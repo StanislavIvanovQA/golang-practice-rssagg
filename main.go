@@ -1,13 +1,18 @@
 package main
 
 import (
+	"StanislavIvanovQA/golang-practice-rssagg/handlers"
+	"StanislavIvanovQA/golang-practice-rssagg/internal/database"
+	"StanislavIvanovQA/golang-practice-rssagg/routes"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
-	"github.com/go-chi/chi"
-	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
+
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -15,27 +20,27 @@ func main() {
 
 	portString := os.Getenv("PORT")
 	if portString == "" {
-		log.Fatal("Port should be specified in environment variables")
+		log.Fatal("PORT should be specified in environment variables")
 	}
 
-	router := chi.NewRouter()
+	dbUrl := os.Getenv("DB_URL")
+	if dbUrl == "" {
+		log.Fatal("DB_URL should be specified in environment variables")
+	}
 
-	router.Use(cors.Handler(
-		cors.Options{
-			AllowedOrigins:   []string{"https://*", "http://*"},
-			AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-			AllowedHeaders:   []string{"*"},
-			ExposedHeaders:   []string{"Link"},
-			AllowCredentials: false,
-			MaxAge:           300,
-		},
-	))
+	conn, err := sql.Open("postgres", dbUrl)
+	if err != nil {
+		log.Fatal("Can't connect to database:", err)
+	}
 
-	v1router := chi.NewRouter()
-	v1router.Get("/healthcheck", handlerReadiness)
-	v1router.Get("/err", handlerError)
+	db := database.New(conn)
+	apiConfig := handlers.ApiConfig{
+		DB: db,
+	}
 
-	router.Mount("/v1", v1router)
+	go startScraping(db, 10, time.Minute)
+
+	router := routes.CreateRouter(&apiConfig)
 
 	srv := &http.Server{
 		Handler: router,
@@ -43,8 +48,8 @@ func main() {
 	}
 
 	log.Printf("Server starting on port %v", portString)
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	if err != nil {
-		log.Fatal("Server is failed to start")
+		log.Fatal("Server is failed to start", err)
 	}
 }
